@@ -28,7 +28,9 @@ services:
       retries: 5
 
   jupyter:
-    image: jupyter/pyspark-notebook:latest
+    build:
+      context: .
+      dockerfile: Jupyter.Dockerfile
     container_name: jupyter_spark
     ports:
       - "8888:8888"
@@ -38,34 +40,27 @@ services:
     environment:
       - JUPYTER_ENABLE_LAB=yes
       - PYSPARK_SUBMIT_ARGS=--packages org.postgresql:postgresql:42.7.2,com.clickhouse:clickhouse-jdbc:0.6.0 pyspark-shell
-    user: root
-    entrypoint: >
-      /bin/bash -c "
-      pip install neopyter;
-      start-notebook.sh --LabApp.token='' --LabApp.password='' --allow-root"
     depends_on:
       postgres:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
 
-  # spark-job:
-  #   image: apache/spark:latest
-  #   container_name: spark_worker
+  # x-spark-common: &spark-common
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
   #   user: root # Required to install jars or write to certain volumes
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
   #   volumes:
   #     - ./scripts:/opt/spark/work-dir
-  #   # We use spark-submit to run the script and include the postgres driver package
+  #
+  # spark-job-ingest:
+  #   <<: *spark-common
+  #   container_name: spark_ingest
   #   entrypoint: >
-  #     /bin/bash -c "
-  #     pip install pyspark;
-  #     /opt/spark/bin/spark-submit \
-  #       --packages org.postgresql:postgresql:42.7.2,com.clickhouse:clickhouse-jdbc:0.6.0 \
-  #       /opt/spark/work-dir/spark_job.py"
-  #   command: >
   #     /opt/spark/bin/spark-submit 
   #     --packages org.postgresql:postgresql:42.7.2 
   #     /opt/spark/work-dir/job.py
