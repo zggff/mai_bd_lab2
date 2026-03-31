@@ -60,4 +60,4 @@ services:
     volumes:
       - ./spark:/opt/spark/work-dir
     entrypoint: >
-      my-spark-submit snowflake.py
+      my-spark-submit star.py
