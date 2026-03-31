@@ -1,0 +1,71 @@
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    volumes:
+      - ./postgres:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydatabase"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse_db
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8123/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  jupyter:
+    image: jupyter/pyspark-notebook:latest
+    container_name: jupyter_spark
+    ports:
+      - "8888:8888"
+      - "9001:9001"
+    volumes:
+      - ./notebooks:/home/jovyan/notebooks
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - PYSPARK_SUBMIT_ARGS=--packages org.postgresql:postgresql:42.7.2,com.clickhouse:clickhouse-jdbc:0.6.0 pyspark-shell
+    user: root
+    entrypoint: >
+      /bin/bash -c "
+      pip install neopyter;
+      start-notebook.sh --LabApp.token='' --LabApp.password='' --allow-root"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+
+  # spark-job:
+  #   image: apache/spark:latest
+  #   container_name: spark_worker
+  #   user: root # Required to install jars or write to certain volumes
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./scripts:/opt/spark/work-dir
+  #   # We use spark-submit to run the script and include the postgres driver package
+  #   entrypoint: >
+  #     /bin/bash -c "
+  #     pip install pyspark;
+  #     /opt/spark/bin/spark-submit \
+  #       --packages org.postgresql:postgresql:42.7.2,com.clickhouse:clickhouse-jdbc:0.6.0 \
+  #       /opt/spark/work-dir/spark_job.py"
+  #   command: >
+  #     /opt/spark/bin/spark-submit 
+  #     --packages org.postgresql:postgresql:42.7.2 
+  #     /opt/spark/work-dir/job.py
