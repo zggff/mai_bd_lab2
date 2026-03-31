@@ -46,21 +46,18 @@ services:
       clickhouse:
         condition: service_healthy
 
-  # x-spark-common: &spark-common
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   user: root # Required to install jars or write to certain volumes
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #   volumes:
-  #     - ./scripts:/opt/spark/work-dir
-  #
-  # spark-job-ingest:
-  #   <<: *spark-common
-  #   container_name: spark_ingest
-  #   entrypoint: >
-  #     /opt/spark/bin/spark-submit 
-  #     --packages org.postgresql:postgresql:42.7.2 
-  #     /opt/spark/work-dir/job.py
+  spark-job:
+    build:
+      context: .
+      dockerfile: Spark.Dockerfile 
+    container_name: spark_ingest
+    user: root # Required to install jars or write to certain volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./spark:/opt/spark/work-dir
+    entrypoint: >
+      my-spark-submit snowflake.py
