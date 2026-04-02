@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, monotonically_increasing_id, expr
+from pyspark.sql.functions import col, monotonically_increasing_id
 
 jdbc_url = "jdbc:postgresql://postgres:5432/mydatabase"
 properties = {
@@ -24,7 +24,6 @@ def write_to_db(df, table_name):
 
 spark = SparkSession.builder \
         .appName("postgres") \
-        .config("spark.driver.memory", "8g") \
         .getOrCreate()
 
 df_raw = read_db("raw_data")

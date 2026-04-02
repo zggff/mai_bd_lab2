@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:14.22
     container_name: postgres_db
     environment:
       POSTGRES_USER: user
@@ -17,10 +17,14 @@ services:
       retries: 5
 
   clickhouse:
-    image: clickhouse/clickhouse-server:latest
+    image: clickhouse/clickhouse-server:26.3
     container_name: clickhouse_db
+    environment:
+      CLICKHOUSE_USER: user
+      CLICKHOUSE_PASSWORD: password
     ports:
       - "8123:8123"
+      - "9000:9000"
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:8123/ || exit 1"]
       interval: 5s
@@ -30,26 +34,27 @@ services:
   jupyter:
     build:
       context: .
-      dockerfile: Jupyter.Dockerfile
     container_name: jupyter_spark
     ports:
       - "8888:8888"
       - "9001:9001"
     volumes:
-      - ./notebooks:/home/jovyan/notebooks
+      - ./notebooks:/app/notebooks
     environment:
-      - JUPYTER_ENABLE_LAB=yes
-      - PYSPARK_SUBMIT_ARGS=--packages org.postgresql:postgresql:42.7.2,com.clickhouse:clickhouse-jdbc:0.6.0 pyspark-shell
+      PYSPARK_DRIVER_PYTHON: jupyter
+      JUPYTER_ENABLE_LAB: yes
+      PYSPARK_DRIVER_PYTHON_OPTS: "lab --ip=0.0.0.0 --port=8888 --allow-root --NotebookApp.token='' --no-browser"
+    command:
+      pyspark
     depends_on:
       postgres:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
 
-  spark-job:
+  spark:
     build:
       context: .
-      dockerfile: Spark.Dockerfile 
     container_name: spark_ingest
     user: root # Required to install jars or write to certain volumes
     depends_on:
@@ -58,6 +63,5 @@ services:
       clickhouse:
         condition: service_healthy
     volumes:
-      - ./spark:/opt/spark/work-dir
-    entrypoint: >
-      my-spark-submit star.py
+      - ./spark:/app
+    entrypoint: /app/entrypoint.sh
