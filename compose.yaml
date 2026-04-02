@@ -1,3 +1,11 @@
+x-spark-dependencies: &spark_deps
+  postgres: { condition: service_healthy }
+  clickhouse: { condition: service_healthy }
+  cassandra: { condition: service_healthy }
+  mongodb: { condition: service_healthy }
+  neo4j: { condition: service_healthy }
+  valkey: { condition: service_healthy }
+
 services:
   postgres:
     image: postgres:14.22
@@ -31,9 +39,65 @@ services:
       timeout: 5s
       retries: 5
 
+  cassandra:
+    image: cassandra:5.0
+    container_name: cassandra_db
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: "Spark Cluster"
+      CASSANDRA_DC: "datacenter1"
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user 
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  neo4j:
+    image: neo4j:5.26.24
+    container_name: neo4j_db
+    environment:
+      NEO4J_AUTH: neo4j/password
+    ports:
+      - "7474:7474" # HTTP
+      - "7687:7687" # Bolt
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  valkey:
+    image: valkey/valkey:9
+    container_name: valkey_db
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: >
+      --requirepass password
+
   jupyter:
     build:
       context: .
+    image: spark_custom
     container_name: jupyter_spark
     ports:
       - "8888:8888"
@@ -46,22 +110,14 @@ services:
       PYSPARK_DRIVER_PYTHON_OPTS: "lab --ip=0.0.0.0 --port=8888 --allow-root --NotebookApp.token='' --no-browser"
     command:
       pyspark
-    depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
+    depends_on: *spark_deps
 
   spark:
-    build:
-      context: .
+    image: spark_custom
     container_name: spark_ingest
     user: root # Required to install jars or write to certain volumes
-    depends_on:
-      postgres:
-        condition: service_healthy
-      clickhouse:
-        condition: service_healthy
+    depends_on: *spark_deps
+
     volumes:
       - ./spark:/app
     entrypoint: /app/entrypoint.sh
