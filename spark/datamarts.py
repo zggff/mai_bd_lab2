@@ -57,12 +57,22 @@ def write_cassandra(df, table_name):
         .partitionBy("_id") \
         .saveAsTable(f"casscatalog.my_keyspace.{table_name}")
 
+def write_mongodb(df, table_name):
+    df.write \
+        .format("mongodb") \
+        .option("connection.uri", "mongodb://user:password@mongodb:27017") \
+        .option("database", "mydatabase") \
+        .option("collection", table_name) \
+        .mode("overwrite") \
+        .save()
 
-def write_to_db(df, table_name, main_col="_id"):
+
+def write_to_db(df, table_name, _main_col="_id"):
     df2 = df.withColumn("_id", f.monotonically_increasing_id())
     # this is to properly order rows
     write_clickhouse(df2, table_name)
     write_cassandra(df2, table_name)
+    write_mongodb(df2, table_name)
 
 
 # %%

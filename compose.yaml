@@ -2,7 +2,7 @@ x-spark-dependencies: &spark_deps
   postgres: { condition: service_healthy }
   clickhouse: { condition: service_healthy }
   cassandra: { condition: service_healthy }
-  # mongodb: { condition: service_healthy }
+  mongodb: { condition: service_healthy }
   # neo4j: { condition: service_healthy }
   # valkey: { condition: service_healthy }
 
@@ -51,6 +51,19 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user 
+      MONGO_INITDB_ROOT_PASSWORD: password
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   jupyter:
     build:
@@ -81,22 +94,6 @@ services:
     entrypoint: /app/entrypoint.sh
 
 
-
-  #
-  # mongodb:
-  #   image: mongo:7.0
-  #   container_name: mongodb
-  #   environment:
-  #     MONGO_INITDB_ROOT_USERNAME: user 
-  #     MONGO_INITDB_ROOT_PASSWORD: password
-  #   ports:
-  #     - "27017:27017"
-  #   healthcheck:
-  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #
   # neo4j:
   #   image: neo4j:5.26.24
   #   container_name: neo4j_db
