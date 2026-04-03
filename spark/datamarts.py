@@ -254,3 +254,5 @@ ratings_correlation = df_rating_sales.select(
 write_to_db(ratings_correlation, "mart_ratings_rating_sales_correlation",
             "rating_sales_correlation")
 ratings_correlation.toPandas()
+
+spark.stop()

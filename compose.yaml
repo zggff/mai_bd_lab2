@@ -8,7 +8,7 @@ x-spark-dependencies: &spark_deps
 
 services:
   postgres:
-    image: postgres:14.22
+    image: postgres:18
     container_name: postgres_db
     environment:
       POSTGRES_USER: user
