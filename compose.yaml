@@ -66,7 +66,16 @@ services:
 
   spark-master:
     build: .
-    # image: apache/spark:3.5.8-python3
+    depends_on:
+      postgres: 
+        condition: service_healthy
+      clickhouse: 
+        condition: service_healthy
+      cassandra: 
+        condition: service_healthy
+      mongodb: 
+        condition: service_healthy
+
     volumes:
       - ./spark:/app
       - spark-data:/opt/spark/work-dir
@@ -79,7 +88,6 @@ services:
 
   spark-worker:
     build: .
-    # image: apache/spark:3.5.8-python3
     depends_on:
       - spark-master
     volumes:
