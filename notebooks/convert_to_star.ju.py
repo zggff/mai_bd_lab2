@@ -26,9 +26,9 @@ def write_to_db(df, table_name):
 
 # %%
 spark = SparkSession.builder \
-        .appName("postgres") \
-        .config("spark.driver.memory", "8g") \
-        .getOrCreate()
+    .appName("JupyterToSpark") \
+    .master("spark://spark-master:7077") \
+    .getOrCreate()
 
 # %%
 
@@ -64,6 +64,7 @@ dim_stores.head()
 
 # %%
 dim_products = df_raw.select(
+                            col("sale_product_id").alias("id"),
                             col("product_brand").alias("brand"),
                             col("product_category").alias("category"),
                             col("product_color").alias("color"),
@@ -78,25 +79,25 @@ dim_products = df_raw.select(
                             col("product_expiry_date").alias("expiry_date"),
                             col("product_reviews").alias("reviews"),
                             col("product_rating").alias("rating"),
-                             ).distinct() \
-                        .withColumn("id", monotonically_increasing_id())
+                             ).distinct()
 write_to_db(dim_products, "dim_products")
 dim_products.head()
 
 # %%
 dim_sellers = df_raw.select(
+                            col("sale_seller_id").alias("id"),
                             col("seller_first_name").alias("first_name"),
                             col("seller_last_name").alias("last_name"),
                             col("seller_email").alias("email"),
                             col("seller_country").alias("country"),
                             col("seller_postal_code").alias("postal_code"),
-                             ).distinct() \
-                        .withColumn("id", monotonically_increasing_id())
+                             ).distinct() 
 write_to_db(dim_sellers, "dim_sellers")
 dim_sellers.head()
 
 # %%
 dim_customers = df_raw.select(
+                            col("sale_customer_id").alias("id"),
                             col("customer_first_name").alias("first_name"),
                             col("customer_last_name").alias("last_name"),
                             col("customer_email").alias("email"),
@@ -106,34 +107,23 @@ dim_customers = df_raw.select(
                             col("customer_pet_name").alias("pet_name"),
                             col("customer_country").alias("country"),
                             col("customer_postal_code").alias("postal_code"),
-                              ).distinct() \
-                        .withColumn("id", monotonically_increasing_id())
+                              ).distinct()
 write_to_db(dim_customers, "dim_customers")
 dim_customers.head()
 
 # %%
-customers = dim_customers.select("email", "id").alias("c")
-sellers = dim_sellers.select("email", "id").alias("s")
 stores = dim_stores.select("email", "id").alias("st")
 suppliers = dim_suppliers.select("email", "id").alias("sp")
-products = dim_products.select("brand", "price", "weight", "id").alias("p")
 
 fact_sales = df_raw \
-    .join(customers, col("customer_email") == col("c.email"), "left") \
-    .join(sellers, col("seller_email") == col("s.email"), "left") \
     .join(stores, col("store_email") == col("st.email"), "left") \
     .join(suppliers, col("supplier_email") == col("sp.email"), "left") \
-    .join(products, 
-          (col("product_brand") == col("p.brand")) &
-          (col("product_price") == col("p.price")) &
-          (col("product_weight") == col("p.weight")),
-          "left") \
     .select(
-        col("c.id").alias("customer_id"),
-        col("s.id").alias("seller_id"),
+        col("sale_customer_id").alias("customer_id"),
+        col("sale_seller_id").alias("seller_id"),
         col("st.id").alias("store_id"),
         col("sp.id").alias("supplier_id"),
-        col("p.id").alias("product_id"),
+        col("sale_product_id").alias("product_id"),
         "pet_category",
         "sale_date",
         "sale_quantity",

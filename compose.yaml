@@ -3,8 +3,6 @@ x-spark-dependencies: &spark_deps
   clickhouse: { condition: service_healthy }
   cassandra: { condition: service_healthy }
   mongodb: { condition: service_healthy }
-  # neo4j: { condition: service_healthy }
-  # valkey: { condition: service_healthy }
 
 services:
   postgres:
@@ -66,60 +64,54 @@ services:
       timeout: 5s
       retries: 5
 
+  spark-master:
+    build: .
+    # image: apache/spark:3.5.8-python3
+    volumes:
+      - ./spark:/app
+      - spark-data:/opt/spark/work-dir
+    environment:
+      - SPARK_MODE=master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+
+  spark-worker:
+    build: .
+    # image: apache/spark:3.5.8-python3
+    depends_on:
+      - spark-master
+    volumes:
+      - ./spark:/app
+      - spark-data:/opt/spark/work-dir
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+
   jupyter:
-    build:
-      context: .
-    image: spark_custom
-    container_name: jupyter_spark
+    build: .
     ports:
       - "8888:8888"
       - "9001:9001"
     volumes:
       - ./notebooks:/app/notebooks
+      - spark-data:/opt/spark/work-dir
+    depends_on:
+      - spark-master
+      - spark-worker
     environment:
-      PYSPARK_DRIVER_PYTHON: jupyter
-      JUPYTER_ENABLE_LAB: yes
-      PYSPARK_DRIVER_PYTHON_OPTS: "lab --ip=0.0.0.0 --port=8888 --allow-root --NotebookApp.token='' --no-browser"
-    command:
-      pyspark
-    depends_on: *spark_deps
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - PYSPARK_PYTHON=python3
+    command: >
+      jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root 
+      --NotebookApp.token='' --NotebookApp.password=''
 
-  spark:
-    image: spark_custom
-    container_name: spark_ingest
-    user: root # Required to install jars or write to certain volumes
-    depends_on: *spark_deps
+volumes:
+  spark-data:
 
-    volumes:
-      - ./spark:/app
-    entrypoint: /app/entrypoint.sh
-
-
-  # neo4j:
-  #   image: neo4j:5.26.24
-  #   container_name: neo4j_db
-  #   environment:
-  #     NEO4J_AUTH: neo4j/password
-  #   ports:
-  #     - "7474:7474" # HTTP
-  #     - "7687:7687" # Bolt
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #
-  # valkey:
-  #   image: valkey/valkey:9
-  #   container_name: valkey_db
-  #   ports:
-  #     - "6379:6379"
-  #   healthcheck:
-  #     test: ["CMD", "valkey-cli", "ping"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 5
-  #   command: >
-  #     --requirepass password
-  #
-  #
