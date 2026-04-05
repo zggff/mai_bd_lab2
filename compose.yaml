@@ -66,6 +66,7 @@ services:
 
   spark-master:
     build: .
+    container_name: spark-master
     depends_on:
       postgres: 
         condition: service_healthy
@@ -77,7 +78,7 @@ services:
         condition: service_healthy
 
     volumes:
-      - ./spark:/app
+      # - ./spark:/app
       - spark-data:/opt/spark/work-dir
     environment:
       - SPARK_MODE=master
@@ -88,10 +89,11 @@ services:
 
   spark-worker:
     build: .
+    container_name: spark-worker
     depends_on:
       - spark-master
     volumes:
-      - ./spark:/app
+      # - ./spark:/app
       - spark-data:/opt/spark/work-dir
     environment:
       - SPARK_MODE=worker
@@ -104,6 +106,7 @@ services:
 
   jupyter:
     build: .
+    container_name: spark-jupyter
     ports:
       - "8888:8888"
       - "9001:9001"

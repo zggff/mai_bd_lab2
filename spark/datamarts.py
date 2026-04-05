@@ -1,8 +1,6 @@
-# %%
 from pyspark.sql import SparkSession
-import pyspark.sql.functions as f
+import pyspark.sql.functions as F
 
-# %%
 from cassandra.cluster import Cluster
 
 cluster = Cluster(['cassandra'])  # Replace with your Cassandra host IP(s)
@@ -15,14 +13,12 @@ session.execute("""
 session.shutdown()
 cluster.shutdown()
 
-# %%
 spark = SparkSession.builder \
     .appName("datamart") \
     .config("spark.sql.catalog.casscatalog", "com.datastax.spark.connector.datasource.CassandraCatalog") \
     .config("spark.sql.catalog.casscatalog.spark.cassandra.connection.host", "cassandra") \
     .getOrCreate()
 
-# %%
 
 
 def read_db(table_name):
@@ -35,7 +31,7 @@ def read_db(table_name):
                            })
 
 
-def write_clickhouse(df, table_name):
+def write_clickhouse(df, table_name, order_by):
     df.write \
         .format("clickhouse") \
         .option("host", "clickhouse") \
@@ -44,18 +40,22 @@ def write_clickhouse(df, table_name):
         .option("user", "user") \
         .option("password", "password") \
         .option("table", table_name) \
-        .option("order_by", "_id") \
+        .option("order_by", order_by) \
         .mode("overwrite") \
         .save()
 
 
-def write_cassandra(df, table_name):
+def write_cassandra(df, table_name, partition_by, use_existing):
+    if not use_existing:
+        df = df.withColumn("_id", F.monotonically_increasing_id())
+        partition_by = "_id"
     df.write \
         .format("org.apache.spark.sql.cassandra") \
         .option("spark.cassandra.connection.host", "cassandra") \
         .mode("append") \
-        .partitionBy("_id") \
+        .partitionBy(partition_by) \
         .saveAsTable(f"casscatalog.my_keyspace.{table_name}")
+
 
 def write_mongodb(df, table_name):
     df.write \
@@ -67,192 +67,80 @@ def write_mongodb(df, table_name):
         .save()
 
 
-def write_to_db(df, table_name, _main_col="_id"):
-    df2 = df.withColumn("_id", f.monotonically_increasing_id())
-    # this is to properly order rows
-    write_clickhouse(df2, table_name)
-    write_cassandra(df2, table_name)
-    write_mongodb(df2, table_name)
+def write_to_db(df, table_name, main_col, use_existing=False):
+    write_clickhouse(df, table_name, main_col)
+    write_cassandra(df, table_name, main_col, use_existing)
+    write_mongodb(df, table_name)
 
 
-# %%
-dim_products = read_db("dim_products")
-dim_customers = read_db("dim_customers")
-dim_sellers = read_db("dim_sellers")
-dim_suppliers = read_db("dim_suppliers")
-dim_stores = read_db("dim_stores")
-fact_sales = read_db("fact_sales")
+p = read_db("dim_products").alias("p")
+c = read_db("dim_customers").alias("c")
+s = read_db("dim_sellers").alias("s")
+sp = read_db("dim_suppliers").alias("sp")
+st = read_db("dim_stores").alias("st")
+f = read_db("fact_sales").alias("f")
 
-# %%
-df_product_sales = fact_sales.join(dim_products,
-                                   fact_sales.product_id == dim_products.id,
-                                   "inner")
+report_products = f.join(p,f.product_id == p.id) \
+            .withColumn("product_name",
+                        F.concat(F.col("brand"), F.lit(": "), F.col("name"))) \
+            .groupBy(F.col("product_name"), p.category) \
+            .agg(
+                 F.sum(f.sale_quantity).alias("total_quantity_sold"),
+                 F.sum(f.sale_total_price).alias("total_revenue"),
+                 F.avg(p.rating).alias("average_rating"),
+                 F.sum(p.reviews).alias("total_reviews"))
+write_to_db(report_products, "report_products", "product_name")
 
-# %%
-products_top_10 = df_product_sales.groupBy("name", "brand") \
-    .agg(
-        f.sum("sale_quantity").alias("total_sold"),
-        f.sum("sale_total_price").alias("total_revenue")
-    ) \
-    .orderBy(f.col("total_sold").desc()) \
-    .limit(10) \
 
-write_to_db(products_top_10, "mart_products_top_10")
-products_top_10.toPandas()
+report_customers = f.join(c, c.id == f.customer_id) \
+            .withColumn("customer_name",
+                        F.concat(F.col("c.first_name"),
+                                 F.lit(" "),
+                                 F.col("c.last_name"))) \
+            .groupBy(F.col("c.id").alias("customer_id"),
+                     F.col("customer_name"),
+                     c.country) \
+            .agg(
+                F.sum(f.sale_total_price).alias("total_spent"),
+                (F.sum(f.sale_total_price) / F.count(f.sale_id)).alias("average_order_value"))
+write_to_db(report_customers, "report_customers", "customer_id", True)
 
-# %%
 
-products_revenue_by_category = df_product_sales.groupBy("category") \
-    .agg(f.sum("sale_total_price").alias("total_revenue")) \
-    .orderBy(f.desc("total_revenue"))
+report_time = f.withColumn("sale_month", F.date_trunc("month", "sale_date")) \
+               .withColumn("sale_year", F.year("sale_date")) \
+               .groupBy("sale_year", "sale_month") \
+               .agg(
+                    F.count(f.sale_id).alias("order_count"),
+                    F.sum(f.sale_total_price).alias("monthly_revenue"),
+                    F.avg(f.sale_total_price).alias("avg_order_size")
+                )
+write_to_db(report_time, "report_time", "sale_month", True)
 
-write_to_db(products_revenue_by_category, "mart_products_revenue",
-            "total_revenue")
-products_revenue_by_category.toPandas()
 
-# %%
-products_rating = df_product_sales.groupBy("name", "brand") \
-    .agg(
-        f.avg("rating").alias("average_rating"),
-        f.sum("reviews").alias("total_reviews")
-    ) \
-    .orderBy(f.col("average_rating").desc())
-write_to_db(products_rating, "mart_products_rating", "average_rating")
-products_rating.toPandas()
+report_stores = f.join(st, st.id == f.store_id) \
+               .groupBy(st.name.alias("store_name"), st.city, st.country) \
+               .agg(
+                    F.sum(f.sale_total_price).alias("total_revenue"),
+                    (F.sum(f.sale_total_price) / F.count(f.sale_id)).alias("store_average_check"))
+write_to_db(report_stores, "report_stores", "store_name")
 
-# %%
-df_customer_sales = fact_sales.join(dim_customers,
-                                    fact_sales.customer_id == dim_customers.id,
-                                    "inner")
 
-# %%
-customers_top_10 = df_customer_sales.groupBy("id","first_name", "last_name", "email") \
-    .agg(f.sum("sale_total_price").alias("total_spent")) \
-    .orderBy(f.desc("total_spent")) \
-    .limit(10)
-write_to_db(customers_top_10, "mart_customers_top_10", "total_spent")
-customers_top_10.toPandas()
+report_suppliers = f.join(sp, f.supplier_id == sp.id) \
+                    .join(p, f.product_id == p.id) \
+                    .groupBy(sp.name.alias("supplier_name"), sp.country) \
+                    .agg(
+                        F.sum(f.sale_total_price).alias("total_revenue_generated"),
+                        F.avg(p.price).alias("avg_product_price"))
+write_to_db(report_suppliers, "report_suppliers", "supplier_name")
 
-# %%
-customers_by_country = dim_customers.groupBy("country") \
-    .agg(f.count("id").alias("customer_count")) \
-    .orderBy(f.desc("customer_count"))
-write_to_db(customers_by_country, "mart_customers_by_country",
-            "customer_count")
-customers_by_country.toPandas()
 
-# %%
-customers_average_check = df_customer_sales.groupBy("id","first_name", "last_name", "email") \
-    .agg(f.avg("sale_total_price").alias("avg_check_amount"))
-write_to_db(customers_average_check, "mart_customers_average_check", "id")
-customers_average_check.toPandas()
 
-# %%
-df_time_sales = fact_sales.withColumn("sale_year", f.year("sale_date")) \
-                          .withColumn("sale_month", f.month("sale_date"))
+report_quality = f.join(p, f.product_id == p.id) \
+                .withColumn("product_name",
+                        F.concat(F.col("brand"), F.lit(": "), F.col("name"))) \
+                .groupBy("product_name", p.rating, p.reviews) \
+                .agg(
+                    F.sum(f.sale_quantity).alias("sales_volume"))
 
-# %%
+write_to_db(report_quality, "report_quality", "product_name")
 
-time_trends = df_time_sales.groupBy("sale_year", "sale_month") \
-    .agg(f.sum("sale_total_price").alias("total_revenue"), f.sum("sale_quantity").alias("total_items_sold")) \
-    .orderBy("sale_year", "sale_month")
-write_to_db(time_trends, "mart_time_monthly_yearly_trends", "sale_year")
-time_trends.toPandas()
-
-# %%
-
-time_average_order_size = df_time_sales.groupBy("sale_year", "sale_month") \
-    .agg(f.avg("sale_total_price").alias("avg_order_value")) \
-    .orderBy("sale_year", "sale_month")
-write_to_db(time_average_order_size, "mart_time_average_order_size",
-            "sale_year")
-time_average_order_size.toPandas()
-
-# %%
-df_store_sales = fact_sales.join(dim_stores,
-                                 fact_sales.store_id == dim_stores.id, "left")
-
-# %%
-stores_top_5 = df_store_sales.groupBy("store_id", "name") \
-    .agg(f.sum("sale_total_price").alias("total_revenue")) \
-    .orderBy(f.desc("total_revenue")) \
-    .limit(5)
-write_to_db(stores_top_5, "mart_stores_top_5", "total_revenue")
-stores_top_5.toPandas()
-
-# %%
-stores_location = df_store_sales.groupBy("country", "city") \
-    .agg(f.sum("sale_total_price").alias("total_revenue"), f.count("sale_id").alias("transactions_count")) \
-    .orderBy(f.desc("transactions_count"))
-write_to_db(stores_location, "mart_stores_location", "transactions_count")
-stores_location.toPandas()
-
-# %%
-stores_average_check = df_store_sales.groupBy("store_id", "name") \
-    .agg(f.avg("sale_total_price").alias("avg_check"))
-write_to_db(stores_average_check, "mart_stores_average_check", "store_id")
-stores_average_check.toPandas()
-
-# %%
-df_supplier_sales = fact_sales.join(dim_suppliers, fact_sales.supplier_id == dim_suppliers.id, "inner") \
-                              .join(dim_products, fact_sales.product_id == dim_products.id, "inner")
-df_supplier_sales.columns
-
-# %%
-suppliers_top_5 = df_supplier_sales.groupBy(fact_sales.supplier_id, dim_suppliers.name, dim_suppliers.email) \
-    .agg(f.sum("sale_total_price").alias("total_revenue")) \
-    .orderBy(f.desc("total_revenue")) \
-    .limit(5)
-write_to_db(suppliers_top_5, "mart_suppliers_top_5", "total_revenue")
-suppliers_top_5.toPandas()
-
-# %%
-suppliers_average_price = df_supplier_sales.groupBy(fact_sales.supplier_id, dim_suppliers.name, dim_suppliers.email) \
-    .agg(f.avg("price").alias("avg_product_price"))
-write_to_db(suppliers_average_price, "mart_suppliers_average_price",
-            "supplier_id")
-suppliers_average_price.toPandas()
-
-# %%
-suppliers_sale_by_country = df_supplier_sales.groupBy(dim_suppliers.country) \
-    .agg(f.sum("sale_total_price").alias("total_revenue")) \
-    .orderBy(f.desc("total_revenue"))
-write_to_db(suppliers_sale_by_country, "mart_suppliers_sale_by_country",
-            "total_revenue")
-suppliers_sale_by_country.toPandas()
-
-# %%
-ratings_rating = products_rating.select("name", "brand", f.col("average_rating").alias("rating")) \
-    .orderBy("average_rating")
-least = ratings_rating.first()
-most = ratings_rating.tail(1)[0]
-ratings_rating_extremes = spark.createDataFrame([least, most])
-write_to_db(ratings_rating_extremes, "mart_ratings_extremes", "rating")
-ratings_rating_extremes.toPandas()
-
-# %%
-ratings_most_reviewed = products_rating.select(
-    "brand", "name",
-    f.col("total_reviews").alias("reviews")).orderBy(f.desc("reviews"))
-write_to_db(ratings_most_reviewed, "mart_ratings_most_reviewed", "reviews")
-ratings_most_reviewed.toPandas()
-
-# %%
-
-# Корреляция между рейтингом и объемом продаж
-df_rating_sales = df_product_sales.groupBy("brand", "name") \
-    .agg(
-        f.avg("rating").alias("rating"),
-        f.sum("sale_quantity").alias("sales")
-    )
-df_rating_sales.toPandas()
-
-# %%
-
-ratings_correlation = df_rating_sales.select(
-    f.corr("rating", "sales").alias("rating_sales_correlation"))
-write_to_db(ratings_correlation, "mart_ratings_rating_sales_correlation",
-            "rating_sales_correlation")
-ratings_correlation.toPandas()
-
-spark.stop()
