@@ -10,5 +10,9 @@ COPY pom.xml .
 RUN mvn dependency:copy-dependencies -DoutputDirectory=/opt/spark/jars
 
 ENV PYSPARK_PYTHON=python3
+ENV SPARK_DRIVER_MEMORY=2g
+ENV SPARK_EXECUTOR_MEMORY=2g
+ENV SPARK_EXECUTOR_MEMORY_OVERHEAD=1g
+
 
 WORKDIR /app
